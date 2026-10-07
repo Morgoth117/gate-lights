@@ -1,16 +1,16 @@
 #include <Adafruit_NeoPixel.h>
 
 #define PIN        6      // Pin where the NeoPixel strip is connected
-#define NUMPIXELS  200    // Number of pixels in your NeoPixel strip
+#define NUMPIXELS  100    // Number of pixels in your NeoPixel strip
 #define OMIT_START 28     // Number of LEDs to omit from the start
 #define OMIT_END   37     // Number of LEDs to omit from the end
 
 // IMPORTANT: using RGB order here as requested
 Adafruit_NeoPixel strip(NUMPIXELS, PIN, NEO_RGB + NEO_KHZ800);
 
-// -------------------- February theme palette --------------------
-// Pink-forward Valentine palette
-uint32_t febColors[4];
+// -------------------- March theme palette --------------------
+// Soft mint, green, lime, deep emerald
+uint32_t marchColors[4];
 
 // Apex you found: ~31–32 past OMIT_START. Start with 32.
 #define APEX_OFFSET_FROM_OMIT_START 32
@@ -32,19 +32,19 @@ unsigned long wipeHoldStart = 0;
 // -------------------- Static colors state (non-blocking) --------------------
 bool staticApplied = false;
 
-// -------------------- Valentine burst restart flag --------------------
-bool valRestart = true;
+// -------------------- Fireworks restart flag --------------------
+bool fwRestart = true;
 
 void setup() {
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
   randomSeed(analogRead(A0));
 
-  // February colors (pink heavy)
-  febColors[0] = strip.Color(255, 70, 150);  // Bright pink
-  febColors[1] = strip.Color(255, 20, 95);   // Deep rose
-  febColors[2] = strip.Color(255, 165, 200); // Soft pink
-  febColors[3] = strip.Color(255, 240, 245); // Blush white
+  // March green palette
+  marchColors[0] = strip.Color(180, 255, 210); // Soft mint
+  marchColors[1] = strip.Color(0, 180, 70);    // Rich green
+  marchColors[2] = strip.Color(120, 255, 80);  // Bright lime
+  marchColors[3] = strip.Color(0, 100, 40);    // Deep emerald
 }
 
 void loop() {
@@ -64,30 +64,30 @@ void loop() {
     // Reset static redraw
     staticApplied = false;
 
-    // Restart valentine burst cleanly next time we enter it
-    valRestart = true;
+    // Restart fireworks cleanly next time we enter it
+    fwRestart = true;
   }
 
   switch (currentEffect) {
     case 0:
-      awesomeTwinkleFebruary();
+      awesomeTwinkleMarch();
       break;
     case 1:
-      colorWipeFebruary(febColors[currentWipeColorIndex], 50, 10000); // hold per color
+      colorWipeMarch(marchColors[currentWipeColorIndex], 50, 10000); // hold per color
       break;
     case 2:
-      valentineFlutterEffect(febColors);
+      fireworksEffect(marchColors);
       break;
     case 3:
-      setStaticColorsFebruary();
+      setStaticColorsMarch();
       break;
   }
 }
 
 // =====================
-// ACCUMULATING AWESOME TWINKLE (NON-BLOCKING) — FEBRUARY COLORS
+// ACCUMULATING AWESOME TWINKLE (NON-BLOCKING) — MARCH COLORS
 // =====================
-void awesomeTwinkleFebruary() {
+void awesomeTwinkleMarch() {
   static unsigned long lastSpawn = 0;
   static unsigned long lastFade  = 0;
 
@@ -107,7 +107,7 @@ void awesomeTwinkleFebruary() {
     int numNew = random(3, 8);
     for (int n = 0; n < numNew; n++) {
       int idx = random(usableStart, usableEnd);
-      uint32_t c = febColors[random(4)];
+      uint32_t c = marchColors[random(4)];
       strip.setPixelColor(idx, c);
     }
     updated = true;
@@ -140,9 +140,9 @@ void awesomeTwinkleFebruary() {
 }
 
 // =====================
-// COLOR WIPE WITH PER-COLOR HOLD — FEBRUARY COLORS
+// COLOR WIPE WITH PER-COLOR HOLD — MARCH COLORS
 // =====================
-void colorWipeFebruary(uint32_t color, int speed, unsigned long holdMs) {
+void colorWipeMarch(uint32_t color, int speed, unsigned long holdMs) {
   unsigned long currentMillis = millis();
 
   if (wipeHolding) {
@@ -169,38 +169,43 @@ void colorWipeFebruary(uint32_t color, int speed, unsigned long holdMs) {
 }
 
 // =====================
-// VALENTINE FLUTTER (UNO-friendly)
-// - launches a pink comet to apex
-// - shifts into a soft flutter around the apex
-// - fades smoothly before restarting
+// FIREWORKS
+// - uses FIXED apex you found (OMIT_START + 32)
+// - restart cleanly when re-entering the effect
+// - now uses March green palette for explosion/trickle
 // =====================
-void valentineFlutterEffect(uint32_t themeColors[]) {
+void fireworksEffect(uint32_t themeColors[]) {
   static int launchPosition = OMIT_START;
-  static bool launching = true;
-  static bool fluttering = false;
+  static bool exploding = false;
   static bool fading = false;
-
+  static bool trickling = false;
   static unsigned long lastUpdate = 0;
-  static int flutterStep = 0;
-  static int flutterFrames = 0;
-  static int fadeFrame = 0;
-  static bool startNewPattern = true;
+  static int explosionRadius = 0;
+  static uint32_t explosionColors[15];
+  static int fadeStep = 255;
+  static int trickleIndex = 0;
+  static int trickleFade[NUMPIXELS];
+  static bool startNewFirework = true;
   static bool launchFromStart = true;
 
-  // Force a clean restart when we switch back to this effect
-  if (valRestart) {
-    valRestart = false;
-    startNewPattern = true;
-    launching = fluttering = fading = false;
+  // Force a clean restart when we switch back to fireworks
+  if (fwRestart) {
+    fwRestart = false;
+    startNewFirework = true;
+    exploding = fading = trickling = false;
     lastUpdate = 0;
-    flutterStep = 0;
-    flutterFrames = 0;
-    fadeFrame = 0;
+    explosionRadius = 0;
+    fadeStep = 255;
+    trickleIndex = 0;
+    memset(trickleFade, 0, sizeof(trickleFade));
     strip.clear();
     strip.show();
   }
 
+  // FIXED CENTER: physical apex you found
   int center = OMIT_START + APEX_OFFSET_FROM_OMIT_START;
+
+  // Safety clamp to usable zone
   int usableMin = OMIT_START;
   int usableMax = NUMPIXELS - OMIT_END - 1;
   if (center < usableMin) center = usableMin;
@@ -208,17 +213,19 @@ void valentineFlutterEffect(uint32_t themeColors[]) {
 
   unsigned long currentMillis = millis();
 
-  // Initialize new flutter cycle
-  if (startNewPattern) {
-    startNewPattern = false;
-    launching = true;
-    fluttering = false;
+  // Initialize a new firework
+  if (startNewFirework) {
+    startNewFirework = false;
+    exploding = false;
     fading = false;
+    trickling = false;
+    trickleIndex = 0;
+    explosionRadius = 0;
+    fadeStep = 255;
 
-    flutterStep = 0;
-    flutterFrames = 0;
-    fadeFrame = 0;
+    memset(trickleFade, 0, sizeof(trickleFade));
 
+    // Randomize launch side: start or end
     if (random(2) == 0) {
       launchFromStart = true;
       launchPosition = OMIT_START;
@@ -231,20 +238,20 @@ void valentineFlutterEffect(uint32_t themeColors[]) {
     strip.show();
   }
 
-  if (launching) {
-    // Gentle comet launch phase
-    if (currentMillis - lastUpdate >= 45) {
+  if (!exploding && !fading && !trickling) {
+    // Launching phase
+    if (currentMillis - lastUpdate > 50) {
       if (launchFromStart) {
         if (launchPosition > OMIT_START) {
-          strip.setPixelColor(launchPosition - 1, strip.Color(45, 10, 20));
+          strip.setPixelColor(launchPosition - 1, 0);
         }
-        strip.setPixelColor(launchPosition, strip.Color(220, 70, 145));
+        strip.setPixelColor(launchPosition, strip.Color(180, 255, 100)); // bright green spark
         launchPosition++;
       } else {
         if (launchPosition < NUMPIXELS - OMIT_END - 1) {
-          strip.setPixelColor(launchPosition + 1, strip.Color(45, 10, 20));
+          strip.setPixelColor(launchPosition + 1, 0);
         }
-        strip.setPixelColor(launchPosition, strip.Color(220, 70, 145));
+        strip.setPixelColor(launchPosition, strip.Color(180, 255, 100)); // bright green spark
         launchPosition--;
       }
 
@@ -253,115 +260,93 @@ void valentineFlutterEffect(uint32_t themeColors[]) {
 
       if ((launchFromStart && launchPosition >= center) ||
           (!launchFromStart && launchPosition <= center)) {
-        launching = false;
-        fluttering = true;
-        flutterStep = 0;
-        flutterFrames = 0;
+        exploding = true;
+
+        // Explosion colors from March palette
+        for (int i = 0; i < 15; i++) {
+          explosionColors[i] = themeColors[random(4)];
+        }
       }
     }
-  } else if (fluttering) {
-    // Soft flutter phase with lightweight math for UNO stability
-    if (currentMillis - lastUpdate >= 40) {
-      int usableEnd = NUMPIXELS - OMIT_END;
-      int maxRadius = 16;
+  } else if (exploding) {
+    // Explosion phase
+    if (currentMillis - lastUpdate > 100) {
+      for (int i = 0; i <= explosionRadius; i++) {
+        if ((center + i) < NUMPIXELS - OMIT_END)
+          strip.setPixelColor(center + i, explosionColors[i % 15]);
+        if ((center - i) >= OMIT_START)
+          strip.setPixelColor(center - i, explosionColors[i % 15]);
+      }
+      strip.show();
+      lastUpdate = currentMillis;
+      explosionRadius++;
 
-      // Keep only usable range dark before redrawing flutter pattern
-      for (int i = OMIT_START; i < usableEnd; i++) {
-        strip.setPixelColor(i, 0);
+      if (explosionRadius > 15) {
+        exploding = false;
+        trickling = true;
+        trickleIndex = 0;
+      }
+    }
+  } else if (trickling) {
+    // Trickling phase
+    if (currentMillis - lastUpdate > 50) {
+      if (center + trickleIndex < NUMPIXELS - OMIT_END) {
+        trickleFade[center + trickleIndex] = 255;
+      }
+      if (center - trickleIndex >= OMIT_START) {
+        trickleFade[center - trickleIndex] = 255;
       }
 
-      // Triangle-wave envelope (no floating point): 70..220
-      int cycle = flutterStep % 24;
-      int wave = (cycle < 12) ? cycle : (24 - cycle);
-      int centerBrightness = 70 + (wave * 25) / 2;
-
-      // Slight width flutter to feel organic
-      int width = 5 + ((flutterStep / 2) % 4); // 5..8
-
-      for (int d = 0; d <= maxRadius; d++) {
-        int idxA = center + d;
-        int idxB = center - d;
-        if (idxA >= usableEnd && idxB < OMIT_START) break;
-
-        // Soft falloff from center using integer math only
-        int falloff = centerBrightness - (d * (centerBrightness / width));
-        if (falloff < 0) falloff = 0;
-
-        // Tiny per-step variation to mimic fluttering wings
-        int flutterTint = ((flutterStep + d) % 6) * 3;
-
-        uint8_t r = (uint8_t)min(255, falloff + 20);
-        uint8_t g = (uint8_t)min(255, (falloff / 5) + flutterTint);
-        uint8_t b = (uint8_t)min(255, (falloff * 3) / 4 + 35);
-
-        if (idxA < usableEnd) {
-          strip.setPixelColor(idxA, strip.Color(r, g, b));
-        }
-        if (idxB >= OMIT_START) {
-          strip.setPixelColor(idxB, strip.Color(r, g, b));
+      for (int i = OMIT_START; i < NUMPIXELS - OMIT_END; i++) {
+        if (trickleFade[i] > 0) {
+          uint32_t color = themeColors[random(4)];
+          uint8_t r = (color >> 16) & 0xFF;
+          uint8_t g = (color >> 8) & 0xFF;
+          uint8_t b = color & 0xFF;
+          strip.setPixelColor(i, strip.Color(r * trickleFade[i] / 255, g * trickleFade[i] / 255, b * trickleFade[i] / 255));
+          trickleFade[i] -= 25;
+        } else {
+          strip.setPixelColor(i, 0);
         }
       }
-
-      // Persistent glow at apex using the provided palette
-      uint32_t apexColor = themeColors[flutterStep % 4];
-      uint8_t ar = (apexColor >> 16) & 0xFF;
-      uint8_t ag = (apexColor >> 8) & 0xFF;
-      uint8_t ab = apexColor & 0xFF;
-      strip.setPixelColor(center, strip.Color((ar * 3) / 4 + 60, (ag * 3) / 4 + 20, (ab * 3) / 4 + 30));
 
       strip.show();
-      flutterStep++;
-      flutterFrames++;
-      lastUpdate = currentMillis;
+      trickleIndex++;
 
-      if (flutterFrames >= 110) { // ~4.4 seconds
-        fluttering = false;
+      if (center + trickleIndex >= NUMPIXELS - OMIT_END && center - trickleIndex < OMIT_START) {
+        trickling = false;
         fading = true;
-        fadeFrame = 0;
+        fadeStep = 255;
       }
+      lastUpdate = currentMillis;
     }
   } else if (fading) {
-    // Smooth global fade down
-    if (currentMillis - lastUpdate >= 55) {
-      int usableEnd = NUMPIXELS - OMIT_END;
-      bool anyLit = false;
-
-      for (int i = OMIT_START; i < usableEnd; i++) {
+    // Fading phase
+    if (currentMillis - lastUpdate > 50) {
+      for (int i = OMIT_START; i < NUMPIXELS - OMIT_END; i++) {
         uint32_t color = strip.getPixelColor(i);
         uint8_t r = (color >> 16) & 0xFF;
         uint8_t g = (color >> 8) & 0xFF;
         uint8_t b = color & 0xFF;
-
-        r = (uint8_t)((r * 215) / 255);
-        g = (uint8_t)((g * 215) / 255);
-        b = (uint8_t)((b * 215) / 255);
-
-        if (r < 2 && g < 2 && b < 2) {
-          r = g = b = 0;
-        } else {
-          anyLit = true;
-        }
-
-        strip.setPixelColor(i, strip.Color(r, g, b));
+        strip.setPixelColor(i, strip.Color(r * fadeStep / 255, g * fadeStep / 255, b * fadeStep / 255));
       }
-
       strip.show();
-      fadeFrame++;
-      lastUpdate = currentMillis;
+      fadeStep -= 25;
 
-      if (!anyLit || fadeFrame > 22) {
+      if (fadeStep <= 0) {
         fading = false;
-        startNewPattern = true;
+        startNewFirework = true;
       }
+      lastUpdate = currentMillis;
     }
   }
 }
 
 // =====================
-// STATIC FEBRUARY COLORS (NON-BLOCKING)
-// Pink, Rose, Soft Pink, Blush White repeating
+// STATIC MARCH COLORS (NON-BLOCKING)
+// Soft mint, green, lime, deep emerald repeating
 // =====================
-void setStaticColorsFebruary() {
+void setStaticColorsMarch() {
   if (staticApplied) return;
   staticApplied = true;
 
@@ -372,7 +357,7 @@ void setStaticColorsFebruary() {
 
   for (int i = usableStart; i < usableEnd; i++) {
     int m = (i - usableStart) % 4;
-    strip.setPixelColor(i, febColors[m]);
+    strip.setPixelColor(i, marchColors[m]);
   }
 
   strip.show();
